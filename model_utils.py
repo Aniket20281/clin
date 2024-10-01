@@ -3,6 +3,7 @@ import json
 import openai
 import time
 import re
+import transformers
 
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -100,7 +101,54 @@ def run_chatgpt_query_multi_turn(messages,
 
     return response
 
-# Multi-turn dialogue for CLIN model : prev message history is summarized and learnings are inserted in the history
+def run_chatgpt_query_multi_turn_CLIN(messages,
+                                      model_path, 
+                      model_name="gpt-3.5-turbo",           
+                      max_tokens=256,
+                      temperature=0.0):
+    response = None
+    while response is None:
+        try:
+            model = transformers.AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
+            tokenizer = transformers.AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
+
+            if tokenizer.pad_token is None:
+                tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+                model.resize_token_embeddings(len(tokenizer))
+            # Changed by Aniket, instead of using chat completion, I am trying single meta prompt
+
+            prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages]) + "\nsystem:"
+
+            inputs = tokenizer(prompt, return_tensors="pt", padding=True)
+
+            print("hello " , prompt)
+            # Generate response
+            output = model.generate(inputs['input_ids'], attention_mask = inputs["attention_mask"] ,max_length=2000, pad_token_id=tokenizer.eos_token_id)
+            # print("hello")
+            # Decode the generated tokens back into text
+            response = tokenizer.decode(output[0], skip_special_tokens=True)
+
+            print("Check " + response)
+            # response = openai.ChatCompletion.create(
+            #     model=model_name,
+            #     messages=messages,
+            #     max_tokens=max_tokens,
+            #     temperature=temperature
+            # )
+        except Exception as e:
+            print(e)
+            print("GPT3 error. Retrying in 10 seconds...")
+            time.sleep(2)
+
+    ans = {}
+    ans["generation"] = response
+    return ans
+
+
+
+#controller and the executor
+#generate the  best action
+
 def get_clin_sw_next_action_multi_turn(task,
                                        current_obs,
                                        current_inventory,
@@ -116,6 +164,7 @@ def get_clin_sw_next_action_multi_turn(task,
                                        quadrant=1,
                                        feedback="",
                                        episodeIdx=None):
+    '''Multi-turn dialogue for CLIN model : prev message history is summarized and learnings are inserted in the history'''
     # We first ask the model to geberate goal (rationale) and then generate next action
 
     next_action_query = ""
@@ -249,6 +298,8 @@ def get_clin_sw_next_action_multi_turn(task,
         next_action_query += "ERROR: {}".format(feedback)
     
 
+    # Combines the controller and the executor prompt to generate the next action
+    
     new_messages.append({
         "role": "user", "content": f"{next_action_query}"
     })
@@ -256,8 +307,9 @@ def get_clin_sw_next_action_multi_turn(task,
     prompt_str = [rec['role'] + ": " + rec['content'] for rec in new_messages]
     # print(
         # f"ChatGPT prompt:\n+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n{prompt_str}\n+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-    response = run_chatgpt_query_multi_turn(
+    response = run_chatgpt_query_multi_turn_CLIN(
         messages=new_messages,
+        model_path = "/home/aniket/models/Mistral-7B-v0.1",  #TODO:Add the model path name
         model_name=model,
         max_tokens=256,
         temperature=temperature,  # 0 for greedy best decoding       # PJ modified from 0.7 to 0.0
@@ -272,7 +324,8 @@ def get_clin_sw_next_action_multi_turn(task,
     # Sometimes ChatGPT returns a long string with actions mentioned in ""
     # Extract strings within double quotes
 
-    response_str = response['choices'][0]['message']['content']
+    # response_str = response['choices'][0]['message']['content']
+    response_str = response['generation']
     response['response_str'] = response_str
     # print("RAW RESPONSE STRING:")
     # print(response_str)
@@ -403,6 +456,46 @@ def summarize(trace, summary_prompt, system_prompt, demo_examples="", prev_memor
     output_summary = response["choices"][0]["message"]["content"]
     return output_summary
 
+
+## changes has been made in this function
+def summarize_CLIN(trace, model_path , summary_prompt, system_prompt, demo_examples="", prev_memories="", model="gpt4", temp=0.7, tokens=1000):
+    print(f"trace:{trace}")
+    print(f"summary_prompt:{summary_prompt}")
+    print(f"system_prompt:{system_prompt}")
+    print(f"demo_examples:{demo_examples}")
+    print(f"prev_memories:{prev_memories}")
+
+    response = None
+    while response is None:
+        try:
+            messages=[{"role": "system", "content": system_prompt},
+                            {"role": "user", "content": summary_prompt},
+                            {"role": "user", "content": demo_examples},
+                            {"role": "user", "content": prev_memories},
+                            {"role": "user", "content": trace}]
+            
+            model = transformers.AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
+            tokenizer = transformers.AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
+            # Changed by Aniket, instead of using chat completion, I am trying single meta prompt
+            prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages]) + "\nsystem:"
+
+            inputs = tokenizer(prompt, return_tensors="pt")
+            
+            # Generate response
+            output = model.generate(inputs['input_ids'], attention_mask = inputs["attention_mask"] ,max_length=2000)
+
+            # Decode the generated tokens back into text
+            response = tokenizer.decode(output[0], skip_special_tokens=True)
+
+        except Exception as e:
+            print(e)
+            print("Error in summarization.")
+            time.sleep(2)
+
+    # output_summary = response["choices"][0]["message"]["content"]
+    return response
+
+
 def summarize_trace_for_preconditions_sTsW(current_run,
                         prev_runs_list=None,
                         gold_run=None,
@@ -493,9 +586,9 @@ def summarize_trace_for_preconditions_sTsW(current_run,
         if len(memories['meta_memory']) > 0:
             final_prev_memories = "META LEARNINGS:\n" + memories['meta_memory'] + final_prev_memories
 
-    summary = summarize(trace=final_trace, summary_prompt=final_prompt, 
+    summary = summarize_CLIN(trace=final_trace, model_path = "/home/aniket/models/Mistral-7B-v0.1", summary_prompt=final_prompt, 
                         system_prompt=system_prompt, prev_memories=final_prev_memories,
-                        model=model, temp=temp, tokens=1000)
+                        model=model, temp=temp, tokens=1000) #TODO : Add model path
 
     print("SUMMARY: {}".format(summary))
     return summary
