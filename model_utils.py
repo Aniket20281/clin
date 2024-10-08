@@ -409,7 +409,7 @@ def get_clin_sw_next_action_multi_turn(task,
     embeddings_gen = model.encode(generated_actions)  # Embeddings of generated actions
     embeddings_poss = model.encode(taskNames)         # Embeddings of possible actions
 
-    similarities = model.similarity(embeddings_gen, embeddings_poss)
+    similarities = sim_model.similarity(embeddings_gen, embeddings_poss)
 
     max_sim = -10000
     max_ind = -1
