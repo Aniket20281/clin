@@ -6,7 +6,7 @@ import re
 import transformers
 
 import sys
-sys.path.insert(1, '/Users/anikgo/Desktop/Exp/ScienceWorld')
+sys.path.insert(1, '/Users/anikgo/Desktop/Gen-AI/ScienceWorld')
 
 from scienceworld import ScienceWorldEnv
 
