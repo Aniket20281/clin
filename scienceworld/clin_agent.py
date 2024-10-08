@@ -4,7 +4,12 @@ import argparse
 import os
 import json
 
+import sys
+sys.path.insert(1, '/Users/anikgo/Desktop/Exp/ScienceWorld')
+
 from scienceworld import ScienceWorldEnv
+
+sys.path.insert(1, '/Users/anikgo/Desktop/Exp/CLIN/clin')
 
 from model_utils import get_best_matched_action_using_sent_transformer,\
     get_clin_sw_next_action_multi_turn, \

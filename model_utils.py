@@ -5,6 +5,11 @@ import time
 import re
 import transformers
 
+import sys
+sys.path.insert(1, '/Users/anikgo/Desktop/Exp/ScienceWorld')
+
+from scienceworld import ScienceWorldEnv
+
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -169,14 +174,24 @@ def get_clin_sw_next_action_multi_turn(task,
 
     next_action_query = ""
 
+
     # Always have task information as first message
+    # sw_prompt_task = f"I'd like you to work your way through a virtual world to complete a particular task. " \
+    #                  f"At each step, tell me which action you want to do, e.g., pick up something, " \
+    #                  f"open something, look around etc. and I will tell you the result. " \
+    #                  f"Then tell me the next action you want to do, until you complete the task." \
+    #                  f"\n\n" \
+    #                  f"Task: {task}" \
+    #                  f"\n\n"
+
     sw_prompt_task = f"I'd like you to work your way through a virtual world to complete a particular task. " \
-                     f"At each step, tell me which action you want to do, e.g., pick up something, " \
+                     f"At each step, tell me the goal you want to acheive in order to complete the task, e.g., pick up something, " \
                      f"open something, look around etc. and I will tell you the result. " \
                      f"Then tell me the next action you want to do, until you complete the task." \
                      f"\n\n" \
                      f"Task: {task}" \
                      f"\n\n"
+    
     if summary:
         if quadrant == 1:
             sw_prompt_task += \
@@ -267,6 +282,41 @@ def get_clin_sw_next_action_multi_turn(task,
     next_actions_set = [x for x in next_actions_set if 'focus' not in x]
     objects_str = '\n '.join(objects_set)
     actions_str = '\n '.join(next_actions_set)
+
+    # Adding the following frozen llm call for the controller, the goal will be generated from here
+
+    response_controller = run_chatgpt_query_multi_turn_CLIN(
+        messages=new_messages,
+        model_name="/home/aniket/models/Mistral-7B-v0.1",
+        max_tokens=256,
+        temperature=0.5,  # 0 for greedy best decoding       # PJ modified from 0.7 to 0.0
+    )
+
+    # The below generated goal is from language understanding and possible set of actions was not fed to the model
+
+    goal_next = response_controller['choices'][0]['message']['content']
+
+    # Starting a new conversational prompt for executor
+
+    executor_prompt_task = f"I will give you a small goal in order to complete the a task.  " \
+                     f"Provide me the next action to take. Some possible actions are listed below :  " \
+                     f"\n\n" \
+                     f"Goal: {goal_next}" \
+                     f"Task: {task}" \
+                     f"\n\n"
+    
+    executor_message = [
+        {"role": "system",
+         "content": "You are an AI agent helping execute a science experiment "
+                    "in a simulated environment with limited number of objects "
+                    "and actions available at each step."
+         },
+        {"role": "user",
+         "content": f"{sw_prompt_task}"
+         }
+    ]
+
+
     # Hints for how to use the actions
     actions_str = actions_str.replace("mix OBJ",
                                       "mix OBJ (here, OBJ should be the container the items to be mixed are in)")
@@ -300,7 +350,7 @@ def get_clin_sw_next_action_multi_turn(task,
 
     # Combines the controller and the executor prompt to generate the next action
     
-    new_messages.append({
+    executor_message.append({
         "role": "user", "content": f"{next_action_query}"
     })
 
@@ -308,11 +358,11 @@ def get_clin_sw_next_action_multi_turn(task,
     # print(
         # f"ChatGPT prompt:\n+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n{prompt_str}\n+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     response = run_chatgpt_query_multi_turn_CLIN(
-        messages=new_messages,
+        messages=executor_message,
         model_path = "/home/aniket/models/Mistral-7B-v0.1",  #TODO:Add the model path name
         model_name=model,
         max_tokens=256,
-        temperature=temperature,  # 0 for greedy best decoding       # PJ modified from 0.7 to 0.0
+        temperature=0.5,  # 0 for greedy best decoding       # PJ modified from 0.7 to 0.0
     )
     # print(f"current_state:{current_obs}")
     # print(f"=====\nNEXT ACTION \ntask:{task}\n current_state:{current_state}"
@@ -348,7 +398,29 @@ def get_clin_sw_next_action_multi_turn(task,
 
     # next_action_str = next_actions[0].lower().strip()
     next_action_str = next_action_str.replace(".", "").replace("i would like to ", "") # .split(' and ')[0]
-    response['pred_next_action'] = next_action_str
+
+    # Here we will calculate similarity scores of the generated action and all possible actions to find the next executable best action.
+
+    sim_model = SentenceTransformer("all-MiniLM-L6-v2")
+    generated_actions = [next_action_str]
+
+    env = ScienceWorldEnv("")
+
+    taskNames = env.getTaskNames()
+    embeddings_gen = model.encode(generated_actions)  # Embeddings of generated actions
+    embeddings_poss = model.encode(taskNames)         # Embeddings of possible actions
+
+    similarities = model.similarity(embeddings_gen, embeddings_poss)
+
+    max_sim = -10000
+    max_ind = -1
+
+    for i in range(len(taskNames)):
+        if similarities[i][0] > max_sim:
+            max_sim = similarities[i][0]
+            max_ind = i
+
+    response['pred_next_action'] = taskNames[max_ind]
 
     # Check to make sure the reasoningStr and next actions are not blank (to prevent the data structure from crashing with blank strings)
     if len(reasoningStr) < 1:
