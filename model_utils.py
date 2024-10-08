@@ -106,8 +106,7 @@ def run_chatgpt_query_multi_turn(messages,
 
     return response
 
-def run_chatgpt_query_multi_turn_CLIN(messages,
-                                      model_path, 
+def run_chatgpt_query_multi_turn_CLIN(messages, 
                       model_name="gpt-3.5-turbo",           
                       max_tokens=256,
                       temperature=0.0):
