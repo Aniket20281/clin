@@ -282,6 +282,15 @@ def get_clin_sw_next_action_multi_turn(task,
     objects_str = '\n '.join(objects_set)
     actions_str = '\n '.join(next_actions_set)
 
+    for message in new_messages:
+
+        with open("output.txt", "w") as file:
+            # Write a line of text to the file
+            file.write(f"Role: {message['role']}")
+            file.write(f"Content: {message['content']}\n")
+            file.write("-------------------------------------")
+
+
     # Adding the following frozen llm call for the controller, the goal will be generated from here
 
     response_controller = run_chatgpt_query_multi_turn_CLIN(
@@ -354,6 +363,15 @@ def get_clin_sw_next_action_multi_turn(task,
     })
 
     prompt_str = [rec['role'] + ": " + rec['content'] for rec in new_messages]
+
+    for message in executor_message:
+
+        with open("output.txt", "w") as file:
+            # Write a line of text to the file
+            file.write(f"Role: {message['role']}")
+            file.write(f"Content: {message['content']}\n")
+            file.write("-------------------------------------")
+
     # print(
         # f"ChatGPT prompt:\n+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n{prompt_str}\n+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     response = run_chatgpt_query_multi_turn_CLIN(
